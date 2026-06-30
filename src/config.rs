@@ -19,6 +19,8 @@ pub(crate) struct PatchConfig {
     pub(crate) startup_delay_seconds: u64,
     pub(crate) fov_enabled: bool,
     pub(crate) fov_multiplier: f32,
+    pub(crate) brake_light_fix_enabled: bool,
+    pub(crate) brake_light_fix_threshold: f64,
 }
 
 impl Default for PatchConfig {
@@ -33,6 +35,8 @@ impl Default for PatchConfig {
             startup_delay_seconds: DEFAULT_STARTUP_DELAY_SECONDS,
             fov_enabled: DEFAULT_FOV_ENABLED,
             fov_multiplier: DEFAULT_FOV_MULTIPLIER,
+            brake_light_fix_enabled: true,
+            brake_light_fix_threshold: 0.0,
         }
     }
 }
@@ -59,11 +63,13 @@ fn serialize_patch_config(mut config: PatchConfig) -> String {
     let camera_shake = if config.camera_shake_fix_enabled { 1 } else { 0 };
     let d3d9_overlay = if config.d3d9_overlay_enabled { 1 } else { 0 };
     let fov_enabled = if config.fov_enabled { 1 } else { 0 };
+    let brake_light_fix = if config.brake_light_fix_enabled { 1 } else { 0 };
 
     format!(
-        "[Patch]\nAntiTamperEnabled = {anti_tamper}\nDlcCarDealerFixEnabled = {dlc_car_dealer_fix}\nSkipIntroEnabled = {skip_intro}\nCameraFixEnabled = {camera_fix}\nCameraShakeFixEnabled = {camera_shake}\nStartupDelaySeconds = {}\n\n[FOV]\nEnabled = {fov_enabled}\nMultiplier = {:.3}\n\n[Overlay]\nD3D9OverlayEnabled = {d3d9_overlay}\n",
+        "[Patch]\nAntiTamperEnabled = {anti_tamper}\nDlcCarDealerFixEnabled = {dlc_car_dealer_fix}\nSkipIntroEnabled = {skip_intro}\nCameraFixEnabled = {camera_fix}\nCameraShakeFixEnabled = {camera_shake}\nStartupDelaySeconds = {}\n\n[FOV]\nEnabled = {fov_enabled}\nMultiplier = {:.3}\n\n[BrakeLight]\nEnabled = {brake_light_fix}\nThreshold = {:.3}\n\n[Overlay]\nD3D9OverlayEnabled = {d3d9_overlay}\n"
         config.startup_delay_seconds,
-        config.fov_multiplier
+        config.fov_multiplier,
+        config.brake_light_fix_threshold,
     )
 }
 
@@ -275,6 +281,46 @@ pub(crate) fn load_patch_config() -> PatchConfig {
                     );
                 }
             }
+            "patch.brakelightfixenabled"
+            | "brakelightfixenabled"
+            | "brakelight.enabled" => {
+                if let Some(parsed) = parse_bool(value) {
+                    config.brake_light_fix_enabled = parsed;
+                } else {
+                    log_warn(
+                        "config",
+                        &format!(
+                            "Invalid bool for BrakeLightFixEnabled on line {}: {value}",
+                            line_idx + 1
+                        ),
+                    );
+                }
+            }
+            "patch.brakelightfixthreshold"
+            | "brakelightfixthreshold"
+            | "brakelight.threshold" => {
+                if let Ok(parsed) = value.trim().parse::<f64>() {
+                    if parsed.is_finite() && parsed >= 0.0 {
+                        config.brake_light_fix_threshold = parsed;
+                    } else {
+                        log_warn(
+                            "config",
+                            &format!(
+                                "Invalid range for BrakeLightFixThreshold on line {}: {value} (must be finite and >= 0)",
+                                     line_idx + 1
+                            ),
+                        );
+                    }
+                } else {
+                    log_warn(
+                        "config",
+                        &format!(
+                            "Invalid float for BrakeLightFixThreshold on line {}: {value}",
+                            line_idx + 1
+                        ),
+                    );
+                }
+            }
             "overlay.d3d9overlayenabled"
             | "d3d9overlayenabled"
             | "patch.d3d9overlayenabled"
@@ -309,7 +355,9 @@ pub(crate) fn load_patch_config() -> PatchConfig {
             config.d3d9_overlay_enabled,
             config.startup_delay_seconds,
             config.fov_enabled,
-            config.fov_multiplier
+            config.fov_multiplier,
+            config.brake_light_fix_enabled,
+            config.brake_light_fix_threshold,
         ),
     );
 
