@@ -2,6 +2,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use crate::config::{load_patch_config, save_patch_config, PatchConfig};
 use crate::features::anti_tamper::apply_anti_tamper_patches;
+use crate::features::brake_light::apply_brake_light_fix_patch;
 use crate::features::camera::{apply_camera_fix_patches, apply_camera_shake_patch};
 use crate::features::dlc::apply_dlc_car_dealer_patches;
 use crate::features::fov::{apply_fov_multiplier_hook, set_fov_multiplier_value};
@@ -32,9 +33,13 @@ const CAMERA_FIX_REGIONS: &[(usize, usize, &str)] = &[
 ];
 
 const CAMERA_SHAKE_FIX_REGIONS: &[(usize, usize, &str)] =
-    &[(0x880000, 0x10000, "camera shake restore region 0x880000")];
+&[(0x880000, 0x10000, "camera shake restore region 0x880000")];
 
-const FOV_REGIONS: &[(usize, usize, &str)] = &[(0x890000, 0x10000, "fov restore region 0x890000")];
+const FOV_REGIONS: &[(usize, usize, &str)] =
+&[(0x890000, 0x10000, "fov restore region 0x890000")];
+
+const BRAKE_LIGHT_FIX_REGIONS: &[(usize, usize, &str)] =
+&[(0x7B0000, 0x10000, "brake_light_fix restore region 0x7B0000")];
 
 #[derive(Clone)]
 struct RegionSnapshot {
@@ -65,6 +70,8 @@ struct RuntimePatchController {
     camera_shake_fix: ToggleState,
     fov: ToggleState,
     fov_multiplier: f32,
+    brake_light_fix: ToggleState,
+    brake_light_fix_threshold: f64,
 }
 
 impl RuntimePatchController {
@@ -77,6 +84,8 @@ impl RuntimePatchController {
             camera_shake_fix: ToggleState::new(),
             fov: ToggleState::new(),
             fov_multiplier: 1.2,
+            brake_light_fix: ToggleState::new(),
+            brake_light_fix_threshold: 0.0,
         }
     }
 
@@ -117,6 +126,8 @@ impl RuntimePatchController {
             camera_shake_fix_enabled: self.camera_shake_fix.enabled,
             fov_enabled: self.fov.enabled,
             fov_multiplier: self.fov_multiplier,
+            brake_light_fix_enabled: self.brake_light_fix.enabled,
+            brake_light_fix_threshold: self.brake_light_fix_threshold,
         }
     }
 
@@ -138,7 +149,6 @@ impl RuntimePatchController {
             if self.anti_tamper.enabled {
                 return true;
             }
-
             ensure_snapshots(base, &mut self.anti_tamper, ANTI_TAMPER_REGIONS);
             apply_anti_tamper_patches(base);
             self.anti_tamper.enabled = true;
@@ -158,7 +168,6 @@ impl RuntimePatchController {
             if self.dlc_fix.enabled {
                 return true;
             }
-
             ensure_snapshots(base, &mut self.dlc_fix, DLC_FIX_REGIONS);
             apply_dlc_car_dealer_patches(base);
             self.dlc_fix.enabled = true;
@@ -178,7 +187,6 @@ impl RuntimePatchController {
             if self.camera_fix.enabled {
                 return true;
             }
-
             ensure_snapshots(base, &mut self.camera_fix, CAMERA_FIX_REGIONS);
             apply_camera_fix_patches(base);
             self.camera_fix.enabled = true;
@@ -198,7 +206,6 @@ impl RuntimePatchController {
             if self.camera_shake_fix.enabled {
                 return true;
             }
-
             ensure_snapshots(base, &mut self.camera_shake_fix, CAMERA_SHAKE_FIX_REGIONS);
             apply_camera_shake_patch(base);
             self.camera_shake_fix.enabled = true;
@@ -218,7 +225,6 @@ impl RuntimePatchController {
             if self.fov.enabled {
                 return true;
             }
-
             ensure_snapshots(base, &mut self.fov, FOV_REGIONS);
             if apply_fov_multiplier_hook(base, self.fov_multiplier) {
                 self.fov.enabled = true;
@@ -232,6 +238,25 @@ impl RuntimePatchController {
             disable_feature_with_restore("FOV", &mut self.fov)
         }
     }
+
+    unsafe fn set_brake_light_fix_enabled(&mut self, enabled: bool) -> bool {
+        let Some(base) = self.ensure_base("BrakeLightFix") else {
+            return self.brake_light_fix.enabled;
+        };
+
+        if enabled {
+            if self.brake_light_fix.enabled {
+                return true;
+            }
+            ensure_snapshots(base, &mut self.brake_light_fix, BRAKE_LIGHT_FIX_REGIONS);
+            apply_brake_light_fix_patch(base, self.brake_light_fix_threshold);
+            self.brake_light_fix.enabled = true;
+            log_info("brake_light_fix", "BrakeLightFix runtime state: ON");
+            true
+        } else {
+            disable_feature_with_restore("BrakeLightFix", &mut self.brake_light_fix)
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -242,13 +267,14 @@ pub(crate) struct RuntimePatchPanelState {
     pub(crate) camera_shake_fix_enabled: bool,
     pub(crate) fov_enabled: bool,
     pub(crate) fov_multiplier: f32,
+    pub(crate) brake_light_fix_enabled: bool,
+    pub(crate) brake_light_fix_threshold: f64,
 }
 
 fn sanitize_fov_multiplier(multiplier: f32, fallback: f32) -> f32 {
     if !multiplier.is_finite() || multiplier <= 0.0 {
         return fallback.max(0.1);
     }
-
     multiplier.clamp(0.1, 4.0)
 }
 
@@ -257,17 +283,15 @@ unsafe fn capture_regions(
     regions: &[(usize, usize, &str)],
 ) -> Vec<RegionSnapshot> {
     let mut snapshots = Vec::with_capacity(regions.len());
-
     for (offset, len, tag) in regions.iter().copied() {
         let address = base + offset;
         let source = std::slice::from_raw_parts(address as *const u8, len);
         snapshots.push(RegionSnapshot {
             address,
             bytes: source.to_vec(),
-            flush_tag: tag.to_string(),
+                       flush_tag: tag.to_string(),
         });
     }
-
     snapshots
 }
 
@@ -316,7 +340,10 @@ fn controller_lock() -> MutexGuard<'static, RuntimePatchController> {
     match controller().lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
-            log_warn("runtime", "Runtime patch controller lock was poisoned; recovering state");
+            log_warn(
+                "runtime",
+                "Runtime patch controller lock was poisoned; recovering state",
+            );
             poisoned.into_inner()
         }
     }
@@ -331,6 +358,8 @@ fn sync_overlay_state(controller: &RuntimePatchController) {
         panel_state.camera_shake_fix_enabled,
         panel_state.fov_enabled,
         panel_state.fov_multiplier,
+        panel_state.brake_light_fix_enabled,
+        panel_state.brake_light_fix_threshold,
     );
 }
 
@@ -383,6 +412,17 @@ pub(crate) fn initialize_runtime_patches(base: usize, config: PatchConfig) -> us
         );
     }
 
+    if config.brake_light_fix_enabled {
+        if unsafe { controller.set_brake_light_fix_enabled(true) } {
+            enabled_groups += 1;
+        }
+    } else {
+        log_info(
+            "brake_light_fix",
+            "BrakeLightFixEnabled=0, skipping brake light fix patch",
+        );
+    }
+
     sync_overlay_state(&controller);
     enabled_groups
 }
@@ -427,6 +467,13 @@ pub(crate) fn set_runtime_fov_multiplier(multiplier: f32) -> f32 {
     applied
 }
 
+pub(crate) fn set_runtime_brake_light_fix_enabled(enabled: bool) -> bool {
+    let mut controller = controller_lock();
+    let actual = unsafe { controller.set_brake_light_fix_enabled(enabled) };
+    sync_overlay_state(&controller);
+    actual
+}
+
 pub(crate) fn persist_runtime_panel_options() -> bool {
     let mut config = load_patch_config();
     let controller = controller_lock();
@@ -437,6 +484,8 @@ pub(crate) fn persist_runtime_panel_options() -> bool {
     config.camera_shake_fix_enabled = controller.camera_shake_fix.enabled;
     config.fov_enabled = controller.fov.enabled;
     config.fov_multiplier = controller.fov_multiplier;
+    config.brake_light_fix_enabled = controller.brake_light_fix.enabled;
+    config.brake_light_fix_threshold = controller.brake_light_fix_threshold;
 
     save_patch_config(config)
 }
