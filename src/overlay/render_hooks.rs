@@ -270,8 +270,8 @@ pub(crate) fn set_overlay_panel_feature_state(
     camera_shake_fix_enabled: bool,
     fov_enabled: bool,
     fov_multiplier: f32,
-    brake_light_fix_enabled: bool,
-    brake_light_fix_threshold: f64,
+    _brake_light_fix_enabled: bool,
+    _brake_light_fix_threshold: f64,
 ) {
     PANEL_ANTI_TAMPER_ENABLED.store(anti_tamper_enabled, Ordering::Relaxed);
     PANEL_DLC_FIX_ENABLED.store(dlc_fix_enabled, Ordering::Relaxed);

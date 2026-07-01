@@ -66,10 +66,10 @@ fn serialize_patch_config(mut config: PatchConfig) -> String {
     let brake_light_fix = if config.brake_light_fix_enabled { 1 } else { 0 };
 
     format!(
-        "[Patch]\nAntiTamperEnabled = {anti_tamper}\nDlcCarDealerFixEnabled = {dlc_car_dealer_fix}\nSkipIntroEnabled = {skip_intro}\nCameraFixEnabled = {camera_fix}\nCameraShakeFixEnabled = {camera_shake}\nStartupDelaySeconds = {}\n\n[FOV]\nEnabled = {fov_enabled}\nMultiplier = {:.3}\n\n[BrakeLight]\nEnabled = {brake_light_fix}\nThreshold = {:.3}\n\n[Overlay]\nD3D9OverlayEnabled = {d3d9_overlay}\n"
-        config.startup_delay_seconds,
-        config.fov_multiplier,
-        config.brake_light_fix_threshold,
+        "[Patch]\nAntiTamperEnabled = {anti_tamper}\nDlcCarDealerFixEnabled = {dlc_car_dealer_fix}\nSkipIntroEnabled = {skip_intro}\nCameraFixEnabled = {camera_fix}\nCameraShakeFixEnabled = {camera_shake}\nStartupDelaySeconds = {startup_delay}\n\n[FOV]\nEnabled = {fov_enabled}\nMultiplier = {fov_multiplier:.3}\n\n[BrakeLight]\nEnabled = {brake_light_fix}\nThreshold = {brake_light_threshold:.3}\n\n[Overlay]\nD3D9OverlayEnabled = {d3d9_overlay}\n",
+        startup_delay = config.startup_delay_seconds,
+        fov_multiplier = config.fov_multiplier,
+        brake_light_threshold = config.brake_light_fix_threshold,
     )
 }
 
@@ -346,7 +346,7 @@ pub(crate) fn load_patch_config() -> PatchConfig {
     log_info(
         "config",
         &format!(
-            "Config loaded: AntiTamperEnabled={}, DlcCarDealerFixEnabled={}, SkipIntroEnabled={}, CameraFixEnabled={}, CameraShakeFixEnabled={}, D3D9OverlayEnabled={}, StartupDelaySeconds={}, FOVEnabled={}, FOVMultiplier={:.3}",
+            "Config loaded: AntiTamperEnabled={}, DlcCarDealerFixEnabled={}, SkipIntroEnabled={}, CameraFixEnabled={}, CameraShakeFixEnabled={}, D3D9OverlayEnabled={}, StartupDelaySeconds={}, FOVEnabled={}, FOVMultiplier={:.3}, BrakeLightFixEnabled={}, BrakeLightFixThreshold={:.3}",
             config.anti_tamper_enabled,
             config.dlc_car_dealer_fix_enabled,
             config.skip_intro_enabled,
